@@ -1,7 +1,7 @@
 # TrackDiffuser: Nearly Model-Free Bayesian Filtering with Diffusion Model
 
 ## Overview
-This repository provides the implementation of the **TrackDiffuser** framework, which utilizes diffusion models for Bayesian filtering. The provided scripts allow users to test the model, explore the dataset, and utilize the pretrained model.
+This repository provides the implementation of the **TrackDiffuser** framework, which utilizes diffusion models for Bayesian filtering. The provided scripts allow users to test the model.
 
 ## Directory Structure
 ```
