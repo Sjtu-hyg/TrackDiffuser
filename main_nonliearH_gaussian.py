@@ -143,9 +143,12 @@ def evaluate_model(trainer, test_input, test_target, test_init):
     cond = expanded_input * mask + cond
 
     returns = returns.view(returns.size(0), -1)
-    predicted_samples = trainer.ema_model.conditional_sample(cond, returns, expanded_input)
+    x_t_estiametd = torch.zeros_like(test_target, dtype=torch.float32, device='cuda')
 
-    x_t_estiametd = reverse_operation(predicted_samples, expanded_input, horizon)
+    for t in range(horizon):
+        indices = torch.arange(batch_size) * horizon + t
+        predicted_samples = trainer.ema_model.conditional_sample(cond[indices], returns[indices], expanded_input[indices])
+        x_t_estiametd[:, t, :] = predicted_samples[:, t, :]
 
     combined_out = {
         'predicted_out': predicted_out,
