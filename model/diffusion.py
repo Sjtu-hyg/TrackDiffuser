@@ -200,7 +200,67 @@ class GaussianDiffusion(nn.Module):
             return x, torch.stack(diffusion, dim=1)
         else:
             return x
+    @torch.no_grad()
+    def p_sample_ddim(self, x, cond, t, t_prev, returns=None, eta=0.0):
 
+        # 1)
+        eps = self.model(x, cond, t, returns)  #
+        # 2)
+        x0_pred = self.predict_start_from_noise(x, t, eps)
+        # 3)
+        alpha_bar_t = self.alphas_cumprod[t]  # shape (B,)
+        alpha_bar_prev = self.alphas_cumprod[t_prev]
+        sqrt_ab_t = alpha_bar_t.sqrt().view(-1, *([1] * (x.dim() - 1)))
+        sqrt_ab_prev = alpha_bar_prev.sqrt().view(-1, *([1] * (x.dim() - 1)))
+        one_minus_ab_t = (1 - alpha_bar_t).sqrt().view(-1, *([1] * (x.dim() - 1)))
+        # σ_t and c_t
+        sigma_t = eta * ((1 - alpha_bar_prev) / (1 - alpha_bar_t) * (1 - alpha_bar_t / alpha_bar_prev)).sqrt()
+        sigma_t = sigma_t.view(-1, *([1] * (x.dim() - 1)))
+        c_t = (1 - alpha_bar_prev - sigma_t.squeeze() ** 2).sqrt().view(-1, 1, 1)
+        # 4)
+        eps_t = (x - sqrt_ab_t * x0_pred) / one_minus_ab_t
+        # 5)
+        x_prev = sqrt_ab_prev * x0_pred + c_t * eps_t
+        if eta > 0:
+            x_prev = x_prev + sigma_t * torch.randn_like(x)
+        return x_prev
+
+    @torch.no_grad()
+    def p_sample_loop_ddim(self, shape, cond, returns, test_input,
+                           verbose=True, return_diffusion=False, ddim_steps=50, eta=0.5):
+
+        device = returns.device
+        batch_size = shape[0]
+
+        x = 0.5 * torch.randn(shape, device=device)
+        mask = test_input != 0
+        x = x * mask.float()
+        x = apply_conditioning(x, cond, self.action_dim)
+        x = test_input.clone()
+
+        if return_diffusion:
+            diffusion = [x]
+
+        T = self.n_timesteps
+        seq = np.linspace(0, T - 1, ddim_steps, dtype=int)
+
+        for i in reversed(range(len(seq))):
+            t = seq[i]
+            t_prev = seq[i - 1] if i > 0 else 0
+            t_batch = torch.full((batch_size,), int(t), device=device, dtype=torch.long)
+            t_prev_batch = torch.full((batch_size,), int(t_prev), device=device, dtype=torch.long)
+
+            x = self.p_sample_ddim(x, cond, t_batch, t_prev_batch, returns, eta)
+            x = x * mask.float()
+            x = apply_conditioning(x, cond, self.action_dim)
+
+            if return_diffusion:
+                diffusion.append(x)
+
+        if return_diffusion:
+            return x, torch.stack(diffusion, dim=1)
+        else:
+            return x
     @torch.no_grad()
     def conditional_sample(self, cond, returns, test_input, horizon=None, *args, **kwargs):
         '''
@@ -211,7 +271,9 @@ class GaussianDiffusion(nn.Module):
         horizon = horizon or self.horizon
         shape = (batch_size, horizon, self.transition_dim)
 
-        return self.p_sample_loop(shape, cond, returns, test_input, *args, **kwargs)
+        # return self.p_sample_loop(shape, cond, returns, test_input, *args, **kwargs)
+
+        return self.p_sample_loop_ddim(shape, cond, returns, test_input, *args, **kwargs)
 
     def grad_p_sample(self, x, cond, t, returns=None):
         b, *_, device = *x.shape, x.device
